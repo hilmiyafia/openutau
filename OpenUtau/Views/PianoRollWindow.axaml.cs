@@ -105,6 +105,7 @@ namespace OpenUtau.App.Views {
                 new Transpose(12, "pianoroll.menu.notes.octaveup"),
                 new Transpose(-12, "pianoroll.menu.notes.octavedown"),
                 new AutoLegato(),
+                new AIAutoTune(),
                 new CommonnoteCopy(),
                 new CommonnotePaste(),
                 new FixOverlap(),

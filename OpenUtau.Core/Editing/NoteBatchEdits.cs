@@ -1,7 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
+using OpenUtau.Core;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using Microsoft.ML.OnnxRuntime;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Format;
 
@@ -183,6 +188,87 @@ namespace OpenUtau.Core.Editing {
             docManager.StartUndoGroup(true);
             for (int i = 0; i < notes.Count - 1; i++) {
                 docManager.ExecuteCmd(new ResizeNoteCommand(part, notes[i], notes[i + 1].position - notes[i].position - notes[i].duration));
+            }
+            docManager.EndUndoGroup();
+        }
+    }
+
+    public class AIAutoTune : BatchEdit {
+        public virtual string Name => name;
+
+        private string name;
+
+        private InferenceSession? session;
+
+        private bool loaded;
+
+        public AIAutoTune() {
+            name = $"pianoroll.menu.notes.aiautotune";
+        }
+
+        public void Run(UProject project, UVoicePart part, List<UNote> selectedNotes, DocManager docManager) {
+            List<UNote> notes = selectedNotes.Count > 0 ? selectedNotes : part.notes.ToList();
+            if (notes.Count == 0) return;
+
+            if (!loaded) {
+                try {
+                    byte[] model = File.ReadAllBytes(Path.Combine(PathManager.Inst.PluginsPath, "model.onnx"));
+                    session = Onnx.getInferenceSession(model);
+                } catch (Exception ex) {
+                    throw new Exception($"Error loading auto tune model.");
+                }
+                loaded = true;
+            }
+
+            notes.Sort((a, b) => a.position.CompareTo(b.position));
+            double start = notes.First().PositionMs - 512 * 5;
+            int count = (int)((notes.Last().EndMs - start) / (5 * 1024) + 2) * 1024;
+            float[,,] input = new float[1, 6, count < 1024 ? 1024 : count];
+            UNote? previousNote = null;
+            for (int i = 0; i < count; i++) {
+                double time = start + i * 5;
+                UNote? note = notes.FirstOrDefault(n => n.PositionMs <= time && time <= n.EndMs);
+                input[0, 0, i] = note != null ? note.tone : -1;
+                input[0, 1, i] = note != previousNote ? 1 : 0;
+                input[0, 2, i] = note == null ? 1 : 0;
+                if (note != null) {
+                    double duration = 16 * 5;
+                    double low = note.PositionMs + duration;
+                    double high = note.EndMs - duration;
+                    double alpha = (time - note.PositionMs) / note.DurationMs;
+                    input[0, 3, i] = low < time && time < high ? 1 : 0;
+                    input[0, 4, i] = (float)(alpha * note.duration / 5);
+                    input[0, 5, i] = (float)(alpha * 100);
+                }
+                previousNote = note;
+            }
+
+            List<NamedOnnxValue> inputs = new List<NamedOnnxValue> {
+                NamedOnnxValue.CreateFromTensor("input", input.ToTensor())
+            };
+            var output = session.Run(inputs).First().AsTensor<float>().ToArray();
+            
+            docManager.StartUndoGroup(true);
+            int xprev = -1, yprev = -1;
+            for (int i = 1; i < count; i++) {
+                double time = start + i * 5;
+                UNote? note = notes.FirstOrDefault(n => n.PositionMs <= time && time <= n.EndMs);
+                if (note == null) continue;
+                int x = project.timeAxis.MsPosToTickPos(time);
+                double pitch = note.tone * 100;
+                pitch += note.pitch.Sample(project, part, note, x) ?? 0;
+                if (note.Next != null && note.Next.position == note.End) {
+                    double? delta = note.Next.pitch.Sample(project, part, note.Next, x);
+                    if (delta != null) {
+                        pitch += delta.Value + note.Next.tone * 100 - note.tone * 100;
+                    }
+                }
+                int y = (int)(output[i] * 100 - pitch);
+                if (xprev != -1) {
+                    docManager.ExecuteCmd(new SetCurveCommand(project, part, Format.Ustx.PITD, x, y, xprev, yprev));
+                }
+                xprev = x;
+                yprev = y;
             }
             docManager.EndUndoGroup();
         }
