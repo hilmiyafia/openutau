@@ -210,10 +210,14 @@ namespace OpenUtau.Core.Editing {
 
             if (!loaded) {
                 try {
-                    byte[] model = File.ReadAllBytes(Path.Combine(PathManager.Inst.PluginsPath, "model.onnx"));
+                    string path = Path.Combine(project.tracks[part.trackNo].Singer.Location, "pitch.onnx");
+                    if (!File.Exists(path)) {
+                        path = Path.Combine(PathManager.Inst.PluginsPath, "pitch.onnx");
+                    }
+                    byte[] model = File.ReadAllBytes(path);
                     session = Onnx.getInferenceSession(model);
                 } catch (Exception ex) {
-                    throw new Exception($"Error loading auto tune model.");
+                    throw new Exception($"Error loading pitch model.");
                 }
                 loaded = true;
             }
