@@ -378,10 +378,6 @@ namespace OpenUtau.App.Views {
                 }
                 if (fromStart) {
                     DocManager.Inst.ExecuteCmd(new MoveNoteCommand(part, note, -deltaDuration, 0));
-                // shiftHeld is not true for the first update method call even though it is pressed.
-                // This behavior is not correct, and if the notes aren't aligned to the grid, it will
-                // cause a gap to form. Detecting the shift key by passing it as a parameter
-                // solve this issue.
                 } else if (shiftHeld) {
                     var rippleNotes = part.notes.Where(n => n.position > note.position).ToList();
                     DocManager.Inst.ExecuteCmd(new MoveNoteCommand(part, rippleNotes, deltaDuration, 0));
